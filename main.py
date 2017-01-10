@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import subprocess
+import datetime
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))+"/lib/text_editor_files")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))+"/lib/image_editor_files")
@@ -77,7 +78,6 @@ class preferences:
 			print "Could not locate saved preferences file (data/prefs.txt)."
 			self.home_directory = "/" if os.name!="nt" else "C:\\"
 			self.open_home_default = "YES"
-
 
 univ_prefs = preferences()
 done_setting_prefs = False
@@ -157,7 +157,6 @@ class preferences_window(QWidget):
 		self.prefs.home_directory = self.home_dir_line.text()
 		self.prefs.open_home_default = "YES" if self.open_home_default_checkbox.isChecked()==True else "NO"
 
-
 class tab_details:
 	def __init__(self):
 		self.current_location = ""
@@ -165,6 +164,92 @@ class tab_details:
 		self.visited = []
 		self.un_visited = []
 		self.tab_widget = ""
+
+class details_window(QWidget):
+
+	def __init__(self, filename, path, parent=None):
+		super(details_window, self).__init__()
+		self.filename = filename
+		self.filepath = path
+
+		self.init_vars()
+		self.init_ui()
+
+	def init_vars(self):
+		#print "here - details_window.init_vars"
+		stats = os.stat(self.filepath)
+
+		self.filesize = stats.st_size #file size in bytes
+		self.modification_date = stats.st_mtime # time of most recent content change
+		self.access_date = stats.st_atime # time of most recent access
+		self.metadata_modification_date = stats.st_ctime # time of most recent change to metadata
+		self.user_id = stats.st_uid # user id of owner
+		self.group_id = stats.st_gid # group id of owner
+
+	def init_ui(self):
+		#print "here - details_window.init_ui"
+
+		self.layout = QVBoxLayout(self)
+
+		self.setWindowTitle(self.filename)
+
+		filesize_label = QLabel("Size:")
+		filesize_real = str(self.filesize/1000)+" KB"
+		if self.filesize<1000:
+			filesize_real = str(self.filesize)+" B"
+		filesize_value = QLineEdit(filesize_real)
+		filesize_value.setEnabled(False)
+		first_row = QHBoxLayout()
+		first_row.addWidget(filesize_label)
+		first_row.addWidget(filesize_value)
+		self.layout.addLayout(first_row)
+
+		modification_date_string = datetime.datetime.fromtimestamp(self.modification_date).strftime('%Y-%m-%d %H:%M:%S')
+		access_date_string = datetime.datetime.fromtimestamp(self.access_date).strftime('%Y-%m-%d %H:%M:%S')
+		metadata_modification_date_string = datetime.datetime.fromtimestamp(self.metadata_modification_date).strftime('%Y-%m-%d %H:%M:%S')
+
+		modification_date_label = QLabel("Last Modified:")
+		modification_date_value = QLineEdit(modification_date_string)
+		modification_date_value.setEnabled(False)
+		second_row = QHBoxLayout()
+		second_row.addWidget(modification_date_label)
+		second_row.addWidget(modification_date_value)
+		self.layout.addLayout(second_row)
+
+		access_date_label = QLabel("Last Accessed:")
+		access_date_value = QLineEdit(access_date_string)
+		access_date_value.setEnabled(False)
+		third_row = QHBoxLayout()
+		third_row.addWidget(access_date_label)
+		third_row.addWidget(access_date_value)
+		self.layout.addLayout(third_row)
+
+		metadata_modification_label = QLabel("Metadata Modified:")
+		metadata_modification_value = QLineEdit(metadata_modification_date_string)
+		metadata_modification_value.setEnabled(False)
+		fourth_row = QHBoxLayout()
+		fourth_row.addWidget(metadata_modification_label)
+		fourth_row.addWidget(metadata_modification_value)
+		self.layout.addLayout(fourth_row)
+
+		user_id_label = QLabel("User ID:")
+		user_id_value = QLineEdit(str(self.user_id))
+		user_id_value.setEnabled(False)
+		fifth_row = QHBoxLayout()
+		fifth_row.addWidget(user_id_label)
+		fifth_row.addWidget(user_id_value)
+		self.layout.addLayout(fifth_row)
+
+		group_id_label = QLabel("Group ID:")
+		group_id_value = QLineEdit(str(self.group_id))
+		group_id_value.setEnabled(False)
+		sixth_row = QHBoxLayout()
+		sixth_row.addWidget(group_id_label)
+		sixth_row.addWidget(group_id_value)
+		self.layout.addLayout(sixth_row)
+
+		self.show()
+
 
 class main_window(QWidget):
 
@@ -351,11 +436,6 @@ class main_window(QWidget):
 
 		# pull the display widget out of the layout for this tab
 		self.current_display_widget = current_tab_layout.itemAt(0).widget()
-
-		'''
-		for i in range(current_tab_layout.count()):
-			print current_tab_layout.itemAt(i)
-		'''
 		
 		self.current_tab_index = new_index
 		self.update_ui()
@@ -404,6 +484,10 @@ class main_window(QWidget):
 
 	def info(self):
 		print "here - info"
+		cur = self.current_display_widget.currentItem().text()
+		full_name = self.current_location+_delim+cur
+		detail_window = details_window(cur,full_name)
+		self.child_windows.append(detail_window)
 
 	def end_pref_edit(self):
 		self.my_prefs = univ_prefs
@@ -476,6 +560,15 @@ class main_window(QWidget):
 			self.open_details(full_name)
 			return
 
+	def is_archive(self,filename):
+		filename = str(filename)
+		exts = [".zip",".tar",".gz"]
+		for ext in exts:
+			if filename.find(ext)!=-1:
+				return True
+		return False
+
+	# redirect the current tab to the home directory
 	def home(self):
 		self.current_location = self.my_prefs.home_directory
 		self.update_ui()
@@ -494,7 +587,13 @@ class main_window(QWidget):
 			if os.path.isdir(elem):
 				new_widget.setIcon(QIcon("resources/directory.png"))
 			if os.path.isfile(elem):
-				new_widget.setIcon(QIcon("resources/file.png"))
+				
+				if self.is_imagefile(elem):
+					new_widget.setIcon(QIcon("resources/pic.png"))
+				elif self.is_archive(elem):
+					new_widget.setIcon(QIcon("resources/zip.png"))
+				elif self.is_textfile(elem):
+					new_widget.setIcon(QIcon("resources/file.png"))
 
 			self.current_display_widget.addItem(new_widget)
 
@@ -546,7 +645,6 @@ class main_window(QWidget):
 		self.current_location = new_loc
 		self.update_ui()
 
-
 	# Redirects the UI to a new location, user's home directory by default
 	def open_location(self, location="home"):
 
@@ -577,11 +675,11 @@ class main_window(QWidget):
 	def collect_garbage(self):
 
 		for child in self.child_windows:
-			child.collect_garbage()
+			child.close()
 
 	# Close all child windows when this one is closed
 	def closeEvent(self, event):
-		#self.collect_garbage()
+		self.collect_garbage()
 		self.my_prefs.save()
 		event.accept()
 
