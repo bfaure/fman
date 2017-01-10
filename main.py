@@ -284,6 +284,8 @@ class main_window(QWidget):
 		# list of tab_details structs, one for each tab that is open
 		self.tabs = []
 
+		self.user_changing_list_item = False
+
 	def init_ui(self):
 
 		# Layout items
@@ -380,7 +382,9 @@ class main_window(QWidget):
 		display = QListWidget()
 		display_layout.addWidget(display)
 		display.itemDoubleClicked.connect(self.item_chosen)
-
+		#display.currentTextChanged.connect(self.user_changed_list_item)
+		display.itemChanged.connect(self.user_changed_list_item)
+		
 		# button to open new tab
 		self.tabButton = QToolButton(self)
 		self.tabButton.setText('+')
@@ -409,6 +413,66 @@ class main_window(QWidget):
 		self.tab_widget.currentChanged.connect(self.tab_changed)
 		QtCore.QObject.connect(self.prefs_window, QtCore.SIGNAL("return_prefs()"), self.end_pref_edit)
 		self.show()
+
+	# check if text follows rules for file or folder naming
+	def item_text_validator(self,text):
+		not_allowed = [",","/","\\"]
+		text = str(text)
+		for item in not_allowed:
+			if text.find(item)!=-1:
+				return False
+		return True
+
+	# slot activated whenever one of the list items is changed, we only
+	# respond if the self.user_changing_list_item flag is set to true.
+	def user_changed_list_item(self):
+
+		if hasattr(self,'user_changing_list_item')==False:
+			return
+		if self.user_changing_list_item==False:
+			return
+		if self.current_display_widget.currentRow()!=self.change_index:
+			return
+
+		item_changed = self.current_display_widget.currentItem()
+		new_text = item_changed.text()
+		old_text = self.list_item_text
+		#print "new_text = "+new_text+" old_text = "+old_text
+
+		if self.item_text_validator(new_text)==False:
+			item_changed.setText(old_text)
+			return
+
+		old_path = self.current_location+_delim+old_text
+		new_path = self.current_location+_delim+new_text
+
+		try:
+			os.rename(old_path,new_path)
+
+		except:
+			item_changed.setText(old_text)
+
+	# slot called when user clicks certain keys
+	def keyPressEvent(self,event):
+
+		# return if user is not interacting with display
+		if self.current_display_widget.hasFocus()==False:
+			return
+
+		allow_editing_on = [Qt.Key_Return,Qt.Key_Enter,16777224]
+		if event.key() in allow_editing_on:
+			print "change the name here"
+			item = self.current_display_widget.currentItem()
+			self.list_item_text = item.text()
+			item.setFlags(item.flags() | Qt.ItemIsEditable)
+			self.current_display_widget.editItem(item)
+			self.user_changing_list_item = True
+			self.change_index = self.current_display_widget.currentRow()
+
+		# On space we want to allow the user to open the information pane			
+		elif event.key() == Qt.Key_I:
+			print "open the information pane here"
+			
 
 	# slot called when tab is changed
 	def tab_changed(self):
@@ -472,6 +536,10 @@ class main_window(QWidget):
 		# initializing some layouts
 		display_layout = QVBoxLayout(new_tab_parent) # display square
 		display = QListWidget()
+		#display.currentTextChanged.connect(self.user_changed_list_item)
+		display.itemChanged.connect(self.user_changed_list_item)
+
+
 		display_layout.addWidget(display)
 		display.itemDoubleClicked.connect(self.item_chosen)
 
