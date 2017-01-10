@@ -12,20 +12,29 @@ app_name = "fman File Manager"
 initial_width = 750
 initial_height = 450
 
+
+
 my_name = "main.py"
 
+_delim = "/"
+
 class preferences:
-	def __init__(self):
-		self.load()
+	def __init__(self,should_load=True):
+		if should_load:
+			self.load()
 
 	def save(self):
 		f = open("data/prefs.txt",'w')
 		f.write("home-->"+self.home_directory+"\n")
+		f.write("open_to_home_by_default-->"+self.open_home_default+"\n")
 
 	def set_value(self,tag,value):
-
 		if tag == "home":
-			self.home_directory = value
+			#self.home_directory = value
+			self.home_directory = "/" if os.name!="nt" else "C:\\"
+			return
+		if tag == "open_to_home_by_default":
+			self.open_home_default = value
 			return
 
 	def load(self):
@@ -39,8 +48,87 @@ class preferences:
 				val = vals[1]
 				self.set_value(tag,val)
 		except:
-			self.home_directory = "/Users/Faure/Desktop"
+			self.home_directory = "/" if os.name!="nt" else "C:\\"
+			self.open_home_default = "YES"
 
+
+univ_prefs = preferences()
+done_setting_prefs = False
+
+class preferences_window(QWidget):
+
+	def __init__(self, parent=None):
+
+		super(preferences_window,self).__init__()
+		self.initUI()
+		self.prefs = preferences(False)
+
+	def initUI(self):
+
+		self.layout = QVBoxLayout(self)
+		self.setWindowTitle("Preferences")
+
+		self.home_dir_label = QLabel("Home Directory:",self)
+		self.home_dir_line = QLineEdit("",self)
+		self.home_dir_line.textChanged.connect(self.prefs_changed)
+		first_row = QHBoxLayout()
+		first_row.addWidget(self.home_dir_label)
+		first_row.addWidget(self.home_dir_line)
+		self.layout.addLayout(first_row)
+
+		self.open_home_default_label = QLabel("Open to Home directory by default?",self)
+		self.open_home_default_checkbox = QCheckBox(self)
+		self.open_home_default_checkbox.stateChanged.connect(self.prefs_changed)
+		second_row = QHBoxLayout()
+		second_row.addWidget(self.open_home_default_label)
+		second_row.addWidget(self.open_home_default_checkbox)
+		self.layout.addLayout(second_row)
+
+
+		self.revert_button = QPushButton("Revert",self)
+		self.revert_button.clicked.connect(self.revert_prefs)
+		self.reset_button = QPushButton("Reset to defaults",self)
+		self.reset_button.clicked.connect(self.reset_prefs)
+
+		last_row = QHBoxLayout()
+		last_row.addWidget(self.revert_button)
+		last_row.addWidget(self.reset_button)
+		self.layout.addLayout(last_row)
+
+		self.save = QPushButton("Save and Return",self)
+		self.save.clicked.connect(self.save_prefs)
+		send_row = QHBoxLayout()
+		send_row.addWidget(self.save)
+		self.layout.addLayout(send_row)
+
+	def save_prefs(self):
+		global univ_prefs
+		global done_setting_prefs
+		univ_prefs = self.prefs
+		done_setting_prefs = True
+		self.hide()
+		self.emit(SIGNAL("return_prefs()"))
+
+	def revert_prefs(self):
+		if hasattr(self,'provided_prefs')==False:
+			return
+		self.home_dir_line.setText(self.provided_prefs.home_directory)
+		self.open_home_default_checkbox.setChecked(True if self.provided_prefs.open_home_default=="YES" else False)
+
+	def reset_prefs(self):
+		self.prefs = preferences()
+		self.home_dir_line.setText(self.prefs.home_directory)
+		self.open_home_default_checkbox.setChecked(True if self.prefs.open_home_default=="YES" else False)
+
+	def open_window(self, prefs):
+		self.provided_prefs = prefs 
+		self.home_dir_line.setText(prefs.home_directory)
+		self.open_home_default_checkbox.setChecked(True if prefs.open_home_default=="YES" else False)
+		self.show()
+
+	def prefs_changed(self):
+		self.prefs.home_directory = self.home_dir_line.text()
+		self.prefs.open_home_default = "YES" if self.open_home_default_checkbox.isChecked()==True else "NO"
 
 class main_window(QWidget):
 
@@ -51,18 +139,26 @@ class main_window(QWidget):
 		self.init_ui()
 
 	def init_vars(self):
+		global _delim
 		#print "initVars()"
 		self.my_prefs = preferences()
 		self.child_windows = []
 		self.this_dir_path = os.path.dirname(os.path.realpath(__file__))
 		self.visited = []
 		self.un_visited = []
+		self.host_os = os.name
+		if self.host_os == "nt":
+			_delim = "\\"
+			#_delim = "/"
+
+		self.prefs_window = preferences_window()
 
 	def init_ui(self):
 
 		# Layout items
 		self.layout = QVBoxLayout(self)
-		#self.layout.addSpacing(20)
+		if self.host_os == "nt":
+			self.layout.addSpacing(20)
 
 		# Menu items
 		self.menubar = QMenuBar(self)
@@ -74,9 +170,11 @@ class main_window(QWidget):
 
 		# Menubar actions
 		self.new_window_action = self.file_menu.addAction("New Window", self.new_window, QKeySequence("Ctrl+N"))
+		self.new_window_action.setEnabled(False)
 		self.restart_app_action = self.file_menu.addAction("Restart Application", self.restart_app, QKeySequence("Ctrl+R"))
+		self.restart_app_action.setEnabled(False)
 		self.exit_action = self.file_menu.addAction("Quit", self.quit_app, QKeySequence("Ctrl+Q"))
-		
+		self.edit_prefs_action = self.edit_menu.addAction("Preferences...", self.edit_prefs)
 		self.home_action = self.place_menu.addAction("Home", self.open_location, QKeySequence("Ctrl+D"))
 
 		# address bar
@@ -110,8 +208,8 @@ class main_window(QWidget):
 		self.search_bar.textChanged.connect(self.search)
 
 		# recent locations list
-		self.recent = QListWidget()
-		self.recent.itemDoubleClicked.connect(self.recent_item_chosen)
+		#self.recent = QListWidget()
+		#self.recent.itemDoubleClicked.connect(self.recent_item_chosen)
 
 		# layout stuff
 		self.top_row = QHBoxLayout()
@@ -137,7 +235,7 @@ class main_window(QWidget):
 		self.navigation_top_row.addWidget(self.home_button)
 
 		self.navigation_second_row = QHBoxLayout()
-		self.navigation_second_row.addWidget(self.recent)
+		#self.navigation_second_row.addWidget(self.recent)
 		self.navigation_layout.addLayout(self.navigation_second_row)
 
 		# display area
@@ -148,7 +246,25 @@ class main_window(QWidget):
 		self.resize(initial_width,initial_height)
 		self.setWindowTitle(app_name)
 		self.update_ui(True)
+
+		QtCore.QObject.connect(self.prefs_window, QtCore.SIGNAL("return_prefs()"), self.end_pref_edit)
 		self.show()
+
+	def end_pref_edit(self):
+		self.my_prefs = univ_prefs
+		self.my_prefs.save()
+
+	def edit_prefs(self):
+		global done_setting_prefs
+		done_setting_prefs = False
+
+		self.prefs_window.open_window(self.my_prefs)
+
+		#while done_setting_prefs==False:
+		#	time.sleep(0.01)
+
+		#self.my_prefs = univ_prefs
+		#self.my_prefs.save()
 
 	def forward(self):
 		if len(self.un_visited)==0:
@@ -157,7 +273,7 @@ class main_window(QWidget):
 		new_loc = self.un_visited[len(self.un_visited)-1]
 		del self.un_visited[-1]
 		self.current_location = new_loc
-		update_ui()
+		self.update_ui()
 
 	def search(self):
 		print "here - search"
@@ -167,7 +283,7 @@ class main_window(QWidget):
 
 	def item_chosen(self):
 		cur = self.display.currentItem().text()
-		full_name = self.current_location+"/"+cur 
+		full_name = self.current_location+_delim+cur 
 
 		if os.path.isdir(full_name):
 			self.current_location = full_name
@@ -191,7 +307,7 @@ class main_window(QWidget):
 		for elem in elems:
 
 			new_widget = QListWidgetItem(elem)
-			elem = new_loc+"/"+elem
+			elem = new_loc+_delim+elem
 
 			if os.path.isdir(elem):
 				new_widget.setIcon(QIcon("resources/directory.png"))
@@ -205,18 +321,21 @@ class main_window(QWidget):
 		if init:
 			self.current_location = self.this_dir_path
 
+			if hasattr(self,'my_prefs')==True:
+				self.current_location = self.my_prefs.home_directory
+
 		self.visited.append(self.current_location)
 		self.update_address_bar(self.current_location)
 		self.update_display(self.current_location)
 
 	def up(self):
 		cur = self.address_bar.text()
-		cur = cur.split("/")
+		cur = cur.split(_delim)
 		del cur[-1]
 		new_loc = ""
 		for elem in cur:
 			new_loc += elem
-			new_loc += "/"
+			new_loc += _delim
 		new_loc = new_loc[:len(new_loc)-1]
 		self.current_location = new_loc
 
