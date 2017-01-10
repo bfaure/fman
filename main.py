@@ -2,7 +2,11 @@ import os
 import sys
 import time
 import subprocess
-#sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))+"/lib")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))+"/lib/text_editor_files")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))+"/lib/image_editor_files")
+from text_editor import text_editor
+from image_editor import image_editor
 
 from PyQt4 import QtGui, QtCore
 from PyQt4.QtCore import *
@@ -12,14 +16,22 @@ app_name = "fman File Manager"
 initial_width = 750
 initial_height = 450
 
-
-
 my_name = "main.py"
 
 _delim = "/"
 
+# Want to add to preferences window to allow user to add custom mappings, i.e.
+# allow the user to specify which applications should be used to open certain 
+# file formats. Also give the ability to set to the default application that would
+# be used by their OS or the default application which comes built in with this
+# distribution of fman.
+
+
 class preferences:
 	def __init__(self,should_load=True):
+
+		self.extra_prefs_values = []
+		self.extra_prefs_tags = []
 		if should_load:
 			self.load()
 
@@ -28,26 +40,41 @@ class preferences:
 		f.write("home-->"+self.home_directory+"\n")
 		f.write("open_to_home_by_default-->"+self.open_home_default+"\n")
 
+		for tag,value in list(zip(self.extra_prefs_tags,self.extra_prefs_values)):
+			f.write(tag+"-->"+value+"\n")
+
+	# Assigns values to data (sourced from data/prefs.txt)
 	def set_value(self,tag,value):
+		#print "here - set_value"
 		if tag == "home":
-			#self.home_directory = value
-			self.home_directory = "/" if os.name!="nt" else "C:\\"
+			self.home_directory = value
+			#self.home_directory = "/" if os.name!="nt" else "C:\\"
 			return
 		if tag == "open_to_home_by_default":
 			self.open_home_default = value
 			return
 
+		else:
+			self.extra_prefs_values.append(value)
+			self.extra_prefs_tags.append(tag)
+			return
+
+	# Tries to load user preferences from data/prefs.txt
 	def load(self):
-		try:
+		fname = "data/prefs.txt"
+		if os.path.isfile(fname):
 			f = open("data/prefs.txt","r")
 			data = f.read()
 			data = data.split("\n")
 			for line in data:
 				vals = line.split("-->")
+				if len(vals)<2: continue
 				tag = vals[0]
 				val = vals[1]
 				self.set_value(tag,val)
-		except:
+			f.close()
+		else:
+			print "Could not locate saved preferences file (data/prefs.txt)."
 			self.home_directory = "/" if os.name!="nt" else "C:\\"
 			self.open_home_default = "YES"
 
@@ -130,6 +157,15 @@ class preferences_window(QWidget):
 		self.prefs.home_directory = self.home_dir_line.text()
 		self.prefs.open_home_default = "YES" if self.open_home_default_checkbox.isChecked()==True else "NO"
 
+
+class tab_details:
+	def __init__(self):
+		self.current_location = ""
+		self.tab_index = ""
+		self.visited = []
+		self.un_visited = []
+		self.tab_widget = ""
+
 class main_window(QWidget):
 
 	def __init__(self, parent=None):
@@ -140,7 +176,7 @@ class main_window(QWidget):
 
 	def init_vars(self):
 		global _delim
-		#print "initVars()"
+		#print "here - initVars"
 		self.my_prefs = preferences()
 		self.child_windows = []
 		self.this_dir_path = os.path.dirname(os.path.realpath(__file__))
@@ -152,6 +188,16 @@ class main_window(QWidget):
 			#_delim = "/"
 
 		self.prefs_window = preferences_window()
+		print "Saved Home Directory = "+self.my_prefs.home_directory
+
+		# text editor window
+		self.text_editor_window = text_editor()
+
+		# image editor window
+		self.image_editor_window = image_editor()
+
+		# list of tab_details structs, one for each tab that is open
+		self.tabs = []
 
 	def init_ui(self):
 
@@ -174,7 +220,7 @@ class main_window(QWidget):
 		self.restart_app_action = self.file_menu.addAction("Restart Application", self.restart_app, QKeySequence("Ctrl+R"))
 		self.restart_app_action.setEnabled(False)
 		self.exit_action = self.file_menu.addAction("Quit", self.quit_app, QKeySequence("Ctrl+Q"))
-		self.edit_prefs_action = self.edit_menu.addAction("Preferences...", self.edit_prefs)
+		self.edit_prefs_action = self.edit_menu.addAction("User Settings", self.edit_prefs)
 		self.home_action = self.place_menu.addAction("Home", self.open_location, QKeySequence("Ctrl+D"))
 
 		# address bar
@@ -182,89 +228,194 @@ class main_window(QWidget):
 		self.address_bar.setEnabled(False)
 
 		# navigation buttons
-		self.up_dir_button = QPushButton("",self)
+		self.up_dir_button = QPushButton(self)
 		self.up_dir_button.setIcon(QIcon("resources/up.png"))
 		self.up_dir_button.clicked.connect(self.up)
 		self.up_dir_button.resize(self.up_dir_button.sizeHint())
 
-		self.back_button = QPushButton("",self)
+		self.back_button = QPushButton(self)
 		self.back_button.setIcon(QIcon("resources/back.png"))
 		self.back_button.clicked.connect(self.back)
-		self.back_button.resize(self.back_button.sizeHint())
+		if os.name !="nt": 
+			self.back_button.setMaximumWidth(50) 
+		else:
+			self.back_button.resize(self.back_button.sizeHint())
+		#self.back_button.resize(self.back_button.sizeHint())
 
-		self.forward_button = QPushButton("",self)
+		self.forward_button = QPushButton(self)
 		self.forward_button.setIcon(QIcon("resources/forward.png"))
 		self.forward_button.clicked.connect(self.forward)
-		self.forward_button.resize(self.forward_button.sizeHint())
+		if os.name !="nt": 
+			self.forward_button.setMaximumWidth(50) 
+		else: 
+			self.forward_button.resize(self.forward_button.sizeHint())
+		#self.forward_button.resize(self.forward_button.sizeHint())
 
-		self.home_button = QPushButton("",self)
+		self.home_button = QPushButton(self)
 		self.home_button.setIcon(QIcon("resources/home.png"))
 		self.home_button.clicked.connect(self.home)
 		self.home_button.resize(self.home_button.sizeHint())
+
+		self.info_button = QPushButton(self)
+		self.info_button.setIcon(QIcon("resources/info.png"))
+		self.info_button.clicked.connect(self.info)
+		self.info_button.resize(self.info_button.sizeHint())
 
 		# search bar
 		self.search_bar = QLineEdit(self)
 		self.search_bar.setPlaceholderText("search...")
 		self.search_bar.textChanged.connect(self.search)
 
-		# recent locations list
-		#self.recent = QListWidget()
-		#self.recent.itemDoubleClicked.connect(self.recent_item_chosen)
-
 		# layout stuff
 		self.top_row = QHBoxLayout()
 		self.top_row.addWidget(self.back_button)
 		self.top_row.addWidget(self.forward_button)
+		self.top_row.addSpacing(10)
 		self.top_row.addWidget(self.up_dir_button)
-		self.top_row.addWidget(self.address_bar,2)
-		self.top_row.addWidget(self.search_bar,1)
+		#self.top_row.addSpacing(60)
+		self.top_row.addStretch()
+		self.top_row.addWidget(self.home_button)
+		self.top_row.addWidget(self.info_button)
+		self.top_row.addWidget(self.address_bar,3)
+		self.top_row.addWidget(self.search_bar,2)
 
 		self.layout.addLayout(self.top_row)
 
+		self.tab_widget = QTabWidget()
+		self.layout.addWidget(self.tab_widget)
+
+		# acts as parent for layout held in first tab
+		first_tab_parent = QWidget()
+
 		# initializing some layouts
-		self.navigation_layout = QVBoxLayout() # left side of display square, below address bar
-		self.display_layout = QVBoxLayout() # display square
-
-		self.second_row = QHBoxLayout() # row below address bar row, holds navigation and square display
-		self.second_row.addLayout(self.navigation_layout)
-		self.second_row.addLayout(self.display_layout)
-		self.layout.addLayout(self.second_row)
-
-		self.navigation_top_row = QHBoxLayout()
-		self.navigation_layout.addLayout(self.navigation_top_row)
-		self.navigation_top_row.addWidget(self.home_button)
-
-		self.navigation_second_row = QHBoxLayout()
-		#self.navigation_second_row.addWidget(self.recent)
-		self.navigation_layout.addLayout(self.navigation_second_row)
+		display_layout = QVBoxLayout(first_tab_parent) # display square
+		self.tab_widget.addTab(first_tab_parent,self.get_final_dir(self.my_prefs.home_directory))
 
 		# display area
-		self.display = QListWidget()
-		self.display_layout.addWidget(self.display)
-		self.display.itemDoubleClicked.connect(self.item_chosen)
+		display = QListWidget()
+		display_layout.addWidget(display)
+		display.itemDoubleClicked.connect(self.item_chosen)
+
+		# button to open new tab
+		self.tabButton = QToolButton(self)
+		self.tabButton.setText('+')
+		font = self.tabButton.font()
+		font.setBold(True)
+		self.tabButton.setFont(font)
+		self.tab_widget.setCornerWidget(self.tabButton)
+		self.tabButton.clicked.connect(self.create_new_tab)
+
+		# data for first tab (only one at this point)
+		first_tab_details = tab_details()
+		first_tab_details.current_location = self.my_prefs.home_directory
+		first_tab_details.tab_index = 0
+		self.tabs.append(first_tab_details)
+
+		# set when the tab is changed
+		self.current_display_widget = display
+
+		# current tab index
+		self.current_tab_index = 0
 
 		self.resize(initial_width,initial_height)
 		self.setWindowTitle(app_name)
 		self.update_ui(True)
 
+		self.tab_widget.currentChanged.connect(self.tab_changed)
 		QtCore.QObject.connect(self.prefs_window, QtCore.SIGNAL("return_prefs()"), self.end_pref_edit)
 		self.show()
+
+	# slot called when tab is changed
+	def tab_changed(self):
+
+		# update last tab info struct
+		last_index = self.current_tab_index
+		last_tab_struct = self.tabs[last_index]
+		last_tab_struct.current_location = self.current_location
+		last_tab_struct.visited = self.visited
+		last_tab_struct.un_visited = self.un_visited
+		last_tab_struct.tab_index = self.current_tab_index
+		self.tabs[last_index] = last_tab_struct
+
+		# load in this tabs info struct
+		new_index = self.tab_widget.currentIndex()
+		this_tab_struct = self.tabs[new_index]
+		self.current_location = this_tab_struct.current_location
+		self.visited = this_tab_struct.visited
+		self.un_visited = this_tab_struct.un_visited
+
+
+		# setting the current display widget (need to fetch it from layout)
+		current_tab_parent = self.tab_widget.currentWidget()
+		current_tab_layout = current_tab_parent.layout()
+
+		# pull the display widget out of the layout for this tab
+		self.current_display_widget = current_tab_layout.itemAt(0).widget()
+
+		'''
+		for i in range(current_tab_layout.count()):
+			print current_tab_layout.itemAt(i)
+		'''
+		
+		self.current_tab_index = new_index
+		self.update_ui()
+
+	# Returns just the last location in a path
+	def get_final_dir(self,path):
+		path = path.split(_delim)
+		return path[len(path)-1]
+
+	def create_new_tab(self):
+		print "here - create_new_tab"
+
+		# saving current tab details to appropriate tab_details struct
+		index = self.tab_widget.currentIndex()
+		tab_info = self.tabs[index]
+		tab_info.current_location = self.current_location
+		tab_info.tab_index = index
+		tab_info.visited = self.visited
+		tab_info.un_visited = self.un_visited
+		self.tabs[index] = tab_info
+
+		# clearing back/forward buffers
+		self.visited = []
+		self.un_visited = []
+		self.current_location = self.my_prefs.home_directory
+
+		# creating new tab
+		new_tab_parent = QWidget()
+		new_tab_details = tab_details()
+		new_tab_details.current_location = self.my_prefs.home_directory
+		new_tab_details.tab_index = self.tab_widget.count()
+		self.tabs.append(new_tab_details)
+
+		# initializing some layouts
+		display_layout = QVBoxLayout(new_tab_parent) # display square
+		display = QListWidget()
+		display_layout.addWidget(display)
+		display.itemDoubleClicked.connect(self.item_chosen)
+
+		self.tab_widget.addTab(new_tab_parent,self.get_final_dir(self.my_prefs.home_directory))
+
+		self.current_display_widget = display
+		self.current_tab_index = self.tab_widget.count()-1
+		self.tab_widget.setCurrentIndex(self.current_tab_index)
+		self.update_ui()
+
+	def info(self):
+		print "here - info"
 
 	def end_pref_edit(self):
 		self.my_prefs = univ_prefs
 		self.my_prefs.save()
+		self.show()
 
 	def edit_prefs(self):
 		global done_setting_prefs
 		done_setting_prefs = False
 
 		self.prefs_window.open_window(self.my_prefs)
-
-		#while done_setting_prefs==False:
-		#	time.sleep(0.01)
-
-		#self.my_prefs = univ_prefs
-		#self.my_prefs.save()
+		self.hide()
 
 	def forward(self):
 		if len(self.un_visited)==0:
@@ -278,12 +429,43 @@ class main_window(QWidget):
 	def search(self):
 		print "here - search"
 
+	# Check if file selected is an image
+	def is_imagefile(self,filename):
+		image_exts = [".jpg",".png",".jpeg",".gif"]
+		filename = str(filename)
+		for ext in image_exts:
+			if filename.find(ext)!=-1:
+				return True
+		return False
+
+	# Check if file selected is text (returning True by default now)
+	def is_textfile(self,filename):
+		text_exts = [".txt"]
+		return True
+
+	# Called when user double clicks on a file in the display
 	def open_details(self,filename):
 		print "here - open_details"
 
+		if self.is_imagefile(filename):
+			self.image_editor_window.open_file(filename)
+			return
+		if self.is_textfile(filename):
+			self.text_editor_window.open_file(filename)
+			return
+
+	# Called when user double clicks something in the display, routes to
+	# open_details (if file) or update_ui (if directory)
 	def item_chosen(self):
-		cur = self.display.currentItem().text()
-		full_name = self.current_location+_delim+cur 
+
+		cur = self.current_display_widget.currentItem().text()
+		full_name = self.current_location+_delim+cur
+
+		# cover cases where we don't want to add delim because there already is one
+		if cur == "/":
+			full_name = self.current_location+cur
+		if len(cur)<=3 and os.name=="nt":
+			full_name = self.current_location+cur
 
 		if os.path.isdir(full_name):
 			self.current_location = full_name
@@ -303,7 +485,7 @@ class main_window(QWidget):
 
 	def update_display(self,new_loc):
 		elems = os.listdir(new_loc)
-		self.display.clear()
+		self.current_display_widget.clear()
 		for elem in elems:
 
 			new_widget = QListWidgetItem(elem)
@@ -314,8 +496,13 @@ class main_window(QWidget):
 			if os.path.isfile(elem):
 				new_widget.setIcon(QIcon("resources/file.png"))
 
-			self.display.addItem(new_widget)
+			self.current_display_widget.addItem(new_widget)
 
+	# updates the tab title
+	def update_tab_title(self,new_loc):
+		self.tab_widget.setTabText(self.tab_widget.currentIndex(),self.get_final_dir(new_loc))
+
+	# handles calling of functions that update the ui elements
 	def update_ui(self, init=False):
 
 		if init:
@@ -327,6 +514,13 @@ class main_window(QWidget):
 		self.visited.append(self.current_location)
 		self.update_address_bar(self.current_location)
 		self.update_display(self.current_location)
+		self.update_tab_title(self.current_location)
+		self.update_window_title(self.current_location)
+
+	def update_window_title(self,new_loc):
+		new_loc = new_loc.split(_delim)
+		new_loc = new_loc[len(new_loc)-1]
+		self.setWindowTitle(new_loc)
 
 	def up(self):
 		cur = self.address_bar.text()
