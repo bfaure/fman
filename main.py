@@ -250,6 +250,10 @@ class details_window(QWidget):
 
 		self.show()
 
+class saved_place:
+	def __init__(self,name_in_list,full_path):
+		self.name = name_in_list
+		self.location = full_path
 
 class main_window(QWidget):
 
@@ -285,6 +289,13 @@ class main_window(QWidget):
 		self.tabs = []
 
 		self.user_changing_list_item = False
+
+		# list of saved places (left hand side of ui), at outset, the only
+		# one will be the home directory
+		self.saved_places = []
+
+		home = saved_place("Home",self.my_prefs.home_directory)
+		self.saved_places.append(home)
 
 	def init_ui(self):
 
@@ -369,7 +380,17 @@ class main_window(QWidget):
 		self.layout.addLayout(self.top_row)
 
 		self.tab_widget = QTabWidget()
-		self.layout.addWidget(self.tab_widget)
+
+		self.second_row = QHBoxLayout()
+		self.layout.addLayout(self.second_row)
+		#self.layout.addWidget(self.tab_widget)
+
+		self.navigation_display = QListWidget()
+		self.second_row.addWidget(self.navigation_display)
+
+		self.navigation_display.setMaximumWidth(125)
+		self.navigation_display.itemClicked.connect(self.navigation_clicked)
+		self.navigation_display.addItem("Home")
 
 		# acts as parent for layout held in first tab
 		first_tab_parent = QWidget()
@@ -382,9 +403,23 @@ class main_window(QWidget):
 		display = QListWidget()
 		display_layout.addWidget(display)
 		display.itemDoubleClicked.connect(self.item_chosen)
-		#display.currentTextChanged.connect(self.user_changed_list_item)
 		display.itemChanged.connect(self.user_changed_list_item)
+		display.setContextMenuPolicy(Qt.CustomContextMenu)
+		display.customContextMenuRequested.connect(self.on_context_menu)
 		
+		# context menu stuff
+		self.popMenu = QMenu(self)
+		self.context_copy_action = self.popMenu.addAction("Copy Item",self.copy)
+		self.context_copy_action.setEnabled(False)
+		self.context_copy_text_action = self.popMenu.addAction("Copy Text",self.copy_text)
+		self.context_copy_text_action.setEnabled(False)
+		self.context_paste_action = self.popMenu.addAction("Paste Item",self.paste)
+		self.context_paste_action.setEnabled(False)
+		self.popMenu.addSeparator()
+		self.context_rename_action = self.popMenu.addAction("Rename [Enter | F2]",self.rename)
+		self.popMenu.addSeparator()
+		self.context_save_action = self.popMenu.addAction("Save Place",self.save_place)
+
 		# button to open new tab
 		self.tabButton = QToolButton(self)
 		self.tabButton.setText('+')
@@ -410,9 +445,70 @@ class main_window(QWidget):
 		self.setWindowTitle(app_name)
 		self.update_ui(True)
 
+		self.second_row.addWidget(self.tab_widget)
+
 		self.tab_widget.currentChanged.connect(self.tab_changed)
 		QtCore.QObject.connect(self.prefs_window, QtCore.SIGNAL("return_prefs()"), self.end_pref_edit)
+
+		self.load_saved_places()
 		self.show()
+
+	def save_place(self):
+		print "here - save_place"
+		cur = self.current_display_widget.currentItem().text()
+		full_name = self.current_location+_delim+cur 
+
+		# cant save a file, only directories
+		if str(full_name).find(".")!=-1:
+			return
+
+		if os.path.isdir(full_name):
+			new_place = saved_place(cur,full_name)
+			self.saved_places.append(new_place)
+			self.update_navi_display()
+
+	# Clears then reloads all of the saved places
+	def update_navi_display(self):
+		self.navigation_display.clear()
+		for item in self.saved_places:
+			self.navigation_display.addItem(item.name)
+
+	def navigation_clicked(self):
+
+		selected = str(self.navigation_display.currentItem().text())
+		dest = ""
+		for place in self.saved_places:
+			if place.name == selected:
+				dest = place.location
+
+		if dest == "":
+			print "Could not find saved place."
+			return
+
+		self.current_location = dest
+		self.update_ui()
+
+	def copy(self):
+		print "here - copy"
+
+	def copy_text(self):
+		print "here - copy_text"
+
+	def paste(self):
+		print "here - paste"
+
+	def rename(self):
+		print "here - rename"
+
+		item = self.current_display_widget.currentItem()
+		self.list_item_text = item.text()
+		item.setFlags(item.flags() | Qt.ItemIsEditable)
+		self.current_display_widget.editItem(item)
+		self.user_changing_list_item = True
+		self.change_index = self.current_display_widget.currentRow()
+
+	def on_context_menu(self,point):
+		self.popMenu.exec_(self.current_display_widget.mapToGlobal(point))
 
 	# check if text follows rules for file or folder naming
 	def item_text_validator(self,text):
@@ -452,6 +548,8 @@ class main_window(QWidget):
 		except:
 			item_changed.setText(old_text)
 
+		self.user_changing_list_item = False
+
 	# slot called when user clicks certain keys
 	def keyPressEvent(self,event):
 
@@ -461,7 +559,6 @@ class main_window(QWidget):
 
 		allow_editing_on = [Qt.Key_Return,Qt.Key_Enter,16777224]
 		if event.key() in allow_editing_on:
-			print "change the name here"
 			item = self.current_display_widget.currentItem()
 			self.list_item_text = item.text()
 			item.setFlags(item.flags() | Qt.ItemIsEditable)
@@ -538,7 +635,8 @@ class main_window(QWidget):
 		display = QListWidget()
 		#display.currentTextChanged.connect(self.user_changed_list_item)
 		display.itemChanged.connect(self.user_changed_list_item)
-
+		display.setContextMenuPolicy(Qt.CustomContextMenu)
+		display.customContextMenuRequested.connect(self.on_context_menu)
 
 		display_layout.addWidget(display)
 		display.itemDoubleClicked.connect(self.item_chosen)
@@ -745,10 +843,43 @@ class main_window(QWidget):
 		for child in self.child_windows:
 			child.close()
 
+	# loads in all of the saved places from data/saved_places.txt (if exists)
+	def load_saved_places(self):
+		fname = "data/saved_places.txt"
+		orig_len = len(self.saved_places)
+		if os.path.isfile(fname):
+			f = open(fname,'r')
+			data = f.read()
+			data = data.split("\n")
+
+			for item in data:
+				if item=="":
+					continue
+
+				vals = item.split("-->")
+
+				name = vals[0]
+				path = vals[1]
+
+				if name == "Home":
+					continue
+
+				new_place = saved_place(name,path)
+				self.saved_places.append(new_place)
+		if len(self.saved_places) != orig_len:
+			self.update_navi_display()
+
+	# saves all of the saved places to data/saved_places.txt
+	def save_saved_places(self):
+		f = open("data/saved_places.txt","w")
+		for item in self.saved_places:
+			f.write(item.name+"-->"+item.location+"\n")
+
 	# Close all child windows when this one is closed
 	def closeEvent(self, event):
 		self.collect_garbage()
 		self.my_prefs.save()
+		self.save_saved_places()
 		event.accept()
 
 	# Quits the app and closes all child windows
