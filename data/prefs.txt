@@ -1,2 +1,0 @@
-home-->C:\Users\bfaure\Desktop
-open_to_home_by_default-->YES
