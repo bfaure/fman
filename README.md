@@ -10,3 +10,6 @@ Windows 10                 |  OSX
 
 ### Default Image Viewer
 ![Alt text](https://github.com/bfaure/fman/blob/master/resources/screenshots/Screen%20Shot%202017-01-10%20at%204.57.51%20PM.png)
+
+## Install
+Requires Python 2.7 & PyQt4. Tested (working) on both Windows 10 and OSX 10.11.3.
